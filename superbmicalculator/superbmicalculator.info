@@ -1,0 +1,5 @@
+core = "7.x"
+description = "A BMI Calculator Module"
+package = Super BMI Calculator
+name = "Body Mass Index Calculator"
+stylesheets[all][] = superbmicalculator.css

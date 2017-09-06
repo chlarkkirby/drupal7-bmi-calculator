@@ -1,0 +1,388 @@
+<?php
+
+/**
+ * Implements hook_block_info().
+ */
+function superbmicalculator_block_info(){
+    $block['superbmicalculator'] = array(
+        'info' => t('BMI Calculator'),
+        'cache' => DRUPAL_NO_CACHE,
+    );
+    return $block;
+}
+
+
+/*
+* Implements hook_block_view().
+*/
+function superbmicalculator_block_view($delta = '') {
+  $block = array();
+  switch ($delta) {
+    case 'superbmicalculator':
+      $block['subject'] = t('BMI Calculator');
+      $block['content'] = drupal_get_form('superbmicalculator_form');
+      break;
+  }
+  return $block; 
+}
+
+
+/**
+ * Implements hook_form().
+ */
+function superbmicalculator_form($form, &$form_state) {
+
+  $form['weight'] = array(
+    '#type' => 'textfield', 
+    '#title' => 'Weight',
+    '#size' => 10,
+    '#maxlength' => 10,
+    '#required' => TRUE, //make this field required 
+  );
+
+   $form['weight_unit'] = array(
+       '#type' => 'select',
+       '#options' => array(
+          'kg' => t('kg'),
+          'lbs' => t('lbs'),
+       ),     
+   );
+  
+   $form['height'] = array(
+    '#type' => 'textfield', 
+    '#title' => 'Height',
+    '#size' => 10,
+    '#maxlength' => 10,
+    '#required' => TRUE, //make this field required 
+  );
+
+   $form['height_unit'] = array(
+       '#type' => 'select',
+       '#options' => array(
+          'cm' => t('cm'),
+          'm' => t('m'),
+          'ft-in' => t('ft-in'),
+       ),      
+   );
+
+   $form['standard'] = array(
+       '#type' => 'select',
+       '#title' => 'Standard',
+       '#options' => array(
+          'who' => t('WHO BMI'),
+          'asian' => t('Asian BMI'),
+       ),     
+   );
+  
+  $form['submit_button'] = array(
+    '#type' => 'submit',
+    '#value' => t('Check My BMI'),
+  );
+  
+  return $form;
+  
+}
+
+
+/**
+ * Validates the submitted contents
+ */
+function superbmicalculator_form_validate($form, &$form_state) {
+  $heightvalue = $form_state['values']['height'];
+  $weightvalue = $form_state['values']['weight'];
+  $heightunitvalue = $form_state['values']['height_unit'];
+
+  if (!($weightvalue > 0)){
+    form_set_error('weight', t('Weight must be a positive number.'));
+  }
+
+  if ($heightvalue == 0){
+    form_set_error('height', t('Height must be a positive number.'));
+  }
+
+  if ($heightunitvalue == 'ft-in'){
+    $pattern = "~^(\d{1,2})[\']?((\d)|([0-1][0-2]))?[\"]?$~";
+    if(!preg_match($pattern, $heightvalue)) {
+      form_set_error('height', t('Height in feet-inches notation must be entered 
+      as ft&#39;in&#34; (e.g. 5&#39;10&#34;)'));   
+     }  
+  }
+
+}
+
+
+/**
+ * Store submitted values on the session to be used on the result page
+ */
+function superbmicalculator_form_submit($form, &$form_state) {
+	$_SESSION['bmi_weight'] = $form_state['values']['weight'];
+  $_SESSION['bmi_weight_unit'] = $form_state['values']['weight_unit'];
+  $_SESSION['bmi_height'] = $form_state['values']['height'];
+  $_SESSION['bmi_height_unit'] = $form_state['values']['height_unit'];	
+  $_SESSION['bmi_standard'] = $form_state['values']['standard'];	
+	$form_state['redirect'] = 'superbmicalculator/result';
+   
+}
+
+
+/**
+ * Make submitted weight value as kilogram for easy computation
+ */
+function to_kilogram($inputweight, $inputweightunit) {
+  if($inputweightunit=='kg') {
+    return $inputweight;
+  } else {
+    //conversion factor: 1 pound = 0.45359237 kilogram
+    $weightinkilogram = ($inputweight * 0.45359237);
+    return $weightinkilogram;
+  }
+}
+
+
+/**
+ * Make submitted height value as meter for easy computation
+ */
+function to_meters($inputheight, $inputheightunit) {
+  if($inputheightunit=='m') {
+    return $inputheight;
+  } 
+  else if($inputheightunit=='cm') {
+    //conversion factor: 1 meter = 100 centimeter
+    $heightinmeters = ($inputheight / 100);
+    return $heightinmeters;
+  }
+  else {
+    preg_match("~^(\d{1,2})[\']?((\d)|([0-1][0-2]))?[\"]?$~", $inputheight, $output);
+    
+      if (count($output)>2) {
+        $feettoinch = $output[1] * 12;
+        $feettoinch + $output[2];
+        $totalinches = $feettoinch + $output[2];
+      } else {
+        $totalinches = $output[1] * 12;
+      }
+    
+    //conversion factor: 1 meter = 39.370078740157 inches
+    $heightinmeters = ($totalinches / 39.370078740157);
+    return $heightinmeters;
+  }
+}
+
+
+/**
+ * Calculate the BMI
+ */
+function compute_bmi($weight, $weight_unit, $height, $height_unit) {
+    $readyweight = to_kilogram($weight,$weight_unit);
+    $readyheight = to_meters($height,$height_unit);
+    $mybmi = round(( $readyweight / ($readyheight * $readyheight) ),2);
+    $computebmi_results = array (
+      'bmiresult' => $mybmi,
+      'con_height' => round($readyheight,2),
+      'con_weight' => round($readyweight,2),
+      );
+    return $computebmi_results;
+}
+
+
+/**
+ * Calculate location of meter indicator for styling
+ * @param $minrange
+ * minimum bmi range for the specific meter color
+ * @param $bmi
+ * the bmi result based on user input 
+ * @param $addconstant
+ * the constant % value for the meter to move position per 0.1 bmi difference
+ * @param $marginstart
+ * the starting percentage of the meter color (e.g green starts at 15%)  
+ */
+function compute_margin($minrange, $bmi, $addconstant, $marginstart) {
+    $compute = abs(($minrange) - $bmi); 
+    if ($compute >= 1.0) {
+      $distance = $compute * 10;
+    } else {
+      $distance = $compute;
+    }
+    $additional = $addconstant * $distance;
+    $marginstyle = $marginstart + $additional; 
+    return $marginstyle;
+}
+
+
+/**
+ * Determine the actual margin percentage for meter indicator and generate the BMI result interpretation
+ * BMI interpretation could be based on WHO (Caucasians / Europeans / Americans) or could be for Asians
+ * @param $bmiresult
+ * the bmi result based on the input
+ * @param $bmistandard
+ * the bmi interpretation standard to follow
+ */
+function get_result($bmiresult,$bmistandard) {
+  $bmi = round($bmiresult,1);
+
+  if($bmistandard =='who') {
+    $standard = 'World Health Organization';
+  } else {
+    $standard = 'Asian';
+  }
+
+  $interpret_underweightrange ='Based on the '.$standard.' BMI Standard, the relationship of your weight 
+    according to your height is within the <span class="interpretaton-text">obese</span> range. <div class="interpretation-addtl">
+    You are at risk of developing nutritional deficiency diseases and osteoporosis.</div>';  
+
+  $interpret_normalrange = 'Based on the '.$standard.' BMI Standard, the relationship of your weight 
+    according to your height is within <span class="interpretaton-text">normal</span> range. <div class="interpretation-addtl">
+    You are at low risk of developing heart diseases, high blood pressure, stroke and diabetes.</div>'; 
+  
+  $interpret_overweightrange = 'Based on the '.$standard.' BMI Standard, the relationship of your weight 
+    according to your height is within the <span class="interpretaton-text">overweight</span> range. <div class="interpretation-addtl">
+    You are at moderate risk of developing heart diseases, high blood pressure, stroke and diabetes. Consult your healthcare provider
+    to determine your ideal weight and lifestyle changes.</div>'; 
+  
+  $interpret_obeserange = 'Based on the '.$standard.' BMI Standard, the relationship of your weight 
+    according to your height is within the <span class="interpretaton-text">obese</span> range. <div class="interpretation-addtl">
+    You are at moderate risk of developing heart diseases, high blood pressure, stroke and diabetes. Consult your healthcare provider
+    to determine your ideal weight and lifestyle changes.</div>'; 
+
+
+  if($bmi <= 18.4) {
+     if ($bmi < 15.5) {
+      $marginstyle = 4; 
+      $interpretation = $interpret_underweightrange;  
+    }
+    if($bmi >= 15.5 && $bmi <= 18.4) {
+      $minrange = 15.5;
+      $addconstant = 0.33;
+      $marginstart = 5;
+      $marginstyle = compute_margin($minrange, $bmi, $addconstant, $marginstart);
+      $interpretation = $interpret_underweightrange;  
+    }
+  }
+  else if ($bmi >= 35) {
+    $marginstyle = 95; 
+    $interpretation = $interpret_obeserange;  
+  }
+  else {
+    if($bmistandard =='who') {
+      //normal range based on WHO
+      if($bmi >= 18.5 && $bmi <= 24.9) {
+        $minrange = 18.5;
+        $addconstant = 0.625;
+        $marginstart = 15;
+        $marginstyle = compute_margin($minrange, $bmi, $addconstant, $marginstart);
+        $interpretation = $interpret_normalrange;
+      }
+      //overweight range based on WHO
+      if($bmi >= 25 && $bmi <= 29.9) {
+        $minrange = 25;
+        $addconstant = 0.61224;
+        $marginstart = 55;
+        $marginstyle = compute_margin($minrange, $bmi, $addconstant, $marginstart);
+        $interpretation = $interpret_overweightrange; 
+      }
+      //obese range based on WHO
+      if($bmi >= 30 && $bmi <= 35) {
+        $minrange = 30;
+        $addconstant = 0.196;
+        $marginstart = 85;
+        $marginstyle = compute_margin($minrange, $bmi, $addconstant, $marginstart); 
+        $interpretation = $interpret_obeserange;  
+      }
+    }
+    else {
+      //normal range for asians
+      if($bmi >= 18.5 && $bmi <= 22.9) {
+        $minrange = 18.5;
+        $addconstant = 0.909;
+        $marginstart = 15;
+        $marginstyle = compute_margin($minrange, $bmi, $addconstant, $marginstart);
+        $interpretation = $interpret_normalrange;
+      }
+      //overweight range for asians
+      if($bmi >= 23 && $bmi <= 27.4) {
+        $minrange = 23;
+        $addconstant = 0.682;
+        $marginstart = 55;
+        $marginstyle = compute_margin($minrange, $bmi, $addconstant, $marginstart);
+        $interpretation = $interpret_overweightrange;
+      }
+      //obese range for asians
+      if($bmi >= 27.5 && $bmi <= 35) {
+        $minrange = 27.5;
+        $addconstant = 0.132;
+        $marginstart = 85;
+        $marginstyle = compute_margin($minrange, $bmi, $addconstant, $marginstart);
+        $interpretation = $interpret_obeserange;
+      }
+
+    }
+  }
+
+  $results = array(
+    'marginstyle' => $marginstyle,
+    'interpretation' => $interpretation,
+  );
+  
+  return $results;
+}
+
+
+
+/**
+ * Generate the result page
+ */
+function superbmicalculator_resultpage() {
+    $weight =  $_SESSION['bmi_weight'];
+    $weight_unit =  $_SESSION['bmi_weight_unit'];
+    $height =  $_SESSION['bmi_height'];
+    $height_unit =  $_SESSION['bmi_height_unit'];
+    $standard =  $_SESSION['bmi_standard'];
+
+    $getbmiresult = compute_bmi($weight, $weight_unit, $height, $height_unit);
+    $bmiresult = $getbmiresult['bmiresult'];
+    $weight_inkilo = $getbmiresult['con_weight'];
+    $height_inmeter = $getbmiresult['con_height'];
+
+    $result = get_result($bmiresult,$standard);
+    $marginstyle = $result['marginstyle'].'%';
+    $interpretation = $result['interpretation'];
+
+     //output the meter
+     $output  = '<div id="bmi-result" class="bmi-result">';
+     $output .= '<div class="meter">';
+     $output .= '<span style="width: 100%"></span>';
+     $output .= '<div style="margin-left:'.$marginstyle.'">';
+     $output .= '<div class="arrow-up"></div>';
+     $output .= '<div class="meter-label">'.$bmiresult.'</div>';
+     $output .= '</div>';
+     $output .= '</div></div>';
+
+     $output .= '<div class="bmi-result-line"> With your weight of '.$weight_inkilo. ' kilograms and 
+                   your height of '.$height_inmeter.' meters, your Body Mass Index is <span 
+                   class="bmi-result-figure">'.$bmiresult.' </span>kg/m&#178</div>';
+     $output .= '<div class="interpretation">'.$interpretation.'</div>';
+    
+return $output;
+
+}
+
+
+/**
+ * Implements hook_menu().
+ */
+function superbmicalculator_menu() {
+  $items = array();
+  $items['superbmicalculator/result'] = array( //this creates a URL that will display the result"
+    'title' => 'Your BMI result', //page title
+    'description' => 'BMI Calculation result Page',
+    'page callback' => 'superbmicalculator_resultpage',
+    'access callback' => TRUE
+  );
+
+  return $items;
+}
+
+
+
+
+
